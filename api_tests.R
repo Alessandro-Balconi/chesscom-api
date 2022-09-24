@@ -236,14 +236,14 @@ if (nrow(resp) > 0){
   
   resp <- resp |>
     mutate(
-      # remove URL from game ID (this also contains the game time format!)
-      game_id = str_remove(url, pattern = "^https://www.chess.com/game/daily/"),
-      # remove URL from tournament name
-      tournament = str_remove(tournament, "^https://api.chess.com/pub/tournament/"),
-      # remove URL from team match
-      match = str_remove(match, "^https://api.chess.com/pub/match/"),
       # convert EPOCHs to readable timestamps
       across(c(move_by, last_activity, start_time), anytime, tz = 'GMT'),
+      # extract ID from URL
+      across(
+        .cols = c(url, tournament, match,),
+        .fns = str_extract,
+        pattern = "[^/]+$"
+      ),
       # remove URL from player IDs
       across(
         .cols = c(white, black), 
@@ -275,7 +275,7 @@ if (nrow(resp) > 0){
     ) |> 
     # relocate columns to an order that makes more sense to me
     relocate(
-      game_id,
+      url,
       start_time,
       time_class,
       time_control,
@@ -319,6 +319,91 @@ resp <- request("https://api.chess.com/pub/player/balcoo/games/2021/01") |>
   # extract the body of the response as a list
   resp_body_json() |> 
   # the response is a list within a list; extract it
-  unlist(recursive = FALSE, use.names = FALSE)
+  unlist(recursive = FALSE, use.names = FALSE) |> 
+  # now turn it into a tibble with 1 row per match
+  tibble(match = _) |> 
+  unnest_wider(match)
 
-# WIP
+# reshape response, unnesting list columns
+# done in multiple steps cause I can't understand how to do it in one...
+# there must be a cleaner way to do this, maybe with "tydyr::unnest_wider()"
+resp <- resp |> 
+# unnest "accuracies" column into 2 columns for white and black accuracies
+  unnest_longer(col = accuracies) |>
+  mutate(accuracies = unname(accuracies)) |>
+  pivot_wider(
+    names_from = accuracies_id,
+    values_from = accuracies,
+    names_glue = '{.name}_accuracy'
+  ) |> 
+  # unnest column with info on "white" player (rating, outcome, ...)
+  unnest_longer(col = white) |> 
+  mutate(white = unlist(white, use.names = FALSE)) |> 
+  pivot_wider(
+    names_from = white_id,
+    values_from = white,
+    names_prefix = 'white_'
+  ) |> 
+  # finally do the same for the "black" player
+  unnest_longer(col = black) |> 
+  mutate(black = unlist(black, use.names = FALSE)) |> 
+  pivot_wider(
+    names_from = black_id,
+    values_from = black,
+    names_prefix = 'black_'
+  )
+
+# some preprocessing
+resp |> 
+  mutate(
+    # convert EPOCHs to readable timestamps
+    across(end_time, anytime, tz = 'GMT'),
+    # extract game ID from URL
+    game_id = str_extract(url, pattern = "[^/]+$"),
+    .keep = 'unused'
+  ) |> 
+  # remove column(s) containing no useful information
+  select(
+    # this is just the endpoint called, no point in keeping it
+    -ends_with("_@id")
+  ) |> 
+  # relocate columns to an order that makes more sense to me
+  relocate()
+
+# still working on this
+
+### MULTI-GAME PGN DOWNLOAD ----------------------------------------------------
+
+# This endpoint sends a PGN as a response, NOT A JSON!
+# This means we have to treat it differently
+
+# function to read a pgn file as a tibble (one row per match)
+get_pgn_as_tibble <- function(pgn){
+  
+  # make a request to the player stats endpoint
+  pgn <- read.table(file = pgn, quote = "", sep = "\n")
+  
+  # get column names
+  col_names <- sub("\\[(\\w+).+", "\\1", pgn[1:21, 1])
+  
+  # convert pgn to a tibble
+  pgn_tbl <- sub("\\[\\w+ \\\"(.+)\\\"\\]", "\\1", pgn[,1]) |> 
+    matrix(byrow = TRUE, ncol = 22) |> 
+    as_tibble(.name_repair = "minimal")
+
+  # add column names
+  names(pgn_tbl) <- c(col_names, 'Moves')
+  
+  # return tibble
+  return(pgn_tbl)
+  
+}
+
+# extract matches from pgn file
+resp <- get_pgn_as_tibble(
+  pgn = "https://api.chess.com/pub/player/balcoo/games/2021/01/pgn"
+)
+
+# tbd
+
+# PLAYER'S CLUBS ---------------------------------------------------------------
