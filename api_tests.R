@@ -9,7 +9,6 @@ library(dplyr)
 library(tidyr)
 library(stringr)
 library(purrr)
-library(magrittr)
 library(httr2)
 library(anytime)
 
@@ -18,11 +17,11 @@ library(anytime)
 ## PLAYER API ------------------------------------------------------------------
 
 # make a request to the player endpoint
-resp <- request("https://api.chess.com/pub/player/balcoo") %>% 
+resp <- request("https://api.chess.com/pub/player/balcoo") |> 
   # perform API call
-  req_perform() %>% 
+  req_perform() |> 
   # extract the body of the response as a list
-  resp_body_json() %>% 
+  resp_body_json() |> 
   # convert to tibble, fix the "@id" column name
   bind_cols(.name_repair = make.names)
 
@@ -60,11 +59,11 @@ opt_cols <- c(
 )
 
 # add empty columns for optional values not present in the response
-resp <- resp %>% 
+resp <- resp |> 
   add_column(!!!opt_cols[!names(opt_cols) %in% names(resp)])
 
 # some preprocessing to keep only relevant information
-resp <- resp %>%
+resp <- resp |>
   mutate(
     # convert EPOCH timestamps to readable times
     across(c(joined, last_online), anytime, tz = 'GMT'),
@@ -73,12 +72,12 @@ resp <- resp %>%
     twitch_url = str_remove(twitch_url, '^https://twitch.tv/'),
     username = str_remove(url,'^https://www.chess.com/member/'),
     .keep = 'unused'
-  ) %>% 
+  ) |> 
   # remove column(s) containing no useful information
   select(
     # this is just the endpoint called, no point in keeping it
     -X.id
-  ) %>% 
+  ) |> 
   # relocate columns to an order that makes more sense to me
   relocate(
     player_id,
@@ -101,14 +100,13 @@ resp <- resp %>%
 
 # make a request to the titled player endpoint
 # valid titles: GM, WGM, IM, WIM, FM, WFM, NM, WNM, CM, WCM
-resp <- request("https://api.chess.com/pub/titled/GM") %>% 
+resp <- request("https://api.chess.com/pub/titled/GM") |> 
   # perform API call
-  req_perform() %>% 
+  req_perform() |> 
   # extract the body of the response as a list
-  resp_body_json() %>% 
+  resp_body_json() |> 
   # the response is an array, so convert it to the equivalent R object
-  unlist() %>% 
-  unname()
+  unlist(use.names = FALSE)
 
 ### COMBINE TITLED PLAYERS AND PLAYER API --------------------------------------
 
@@ -117,9 +115,9 @@ resp <- request("https://api.chess.com/pub/titled/GM") %>%
 get_player_profile <- function(player){
   
   # make a request to the player endpoint
-  resp <- request(paste0("https://api.chess.com/pub/player/", player)) %>% 
-    req_perform() %>% 
-    resp_body_json() %>% 
+  resp <- request(paste0("https://api.chess.com/pub/player/", player)) |> 
+    req_perform() |> 
+    resp_body_json() |> 
     bind_cols(.name_repair = make.names)
   
   # for the optional fields, we create empty column if they are not present
@@ -132,21 +130,21 @@ get_player_profile <- function(player){
   )
   
   # add empty columns for optional values not present in the response
-  resp <- resp %>% 
+  resp <- resp |> 
     add_column(!!!opt_cols[!names(opt_cols) %in% names(resp)])
   
   # some preprocessing to keep only relevant information
-  resp <- resp %>%
+  resp <- resp |>
     mutate(
       across(c(joined, last_online), anytime, tz = 'GMT'),
       country = str_remove(country, '^https://api.chess.com/pub/country/'),
       twitch_url = str_remove(twitch_url, '^https://twitch.tv/'),
       username = str_remove(url,'^https://www.chess.com/member/'),
       .keep = 'unused'
-    ) %>% 
+    ) |> 
     select(
       -X.id
-    ) %>% 
+    ) |> 
     relocate(
       player_id,
       username,
@@ -179,9 +177,9 @@ get_player_profile <- function(player){
 ## PLAYER STATS ----------------------------------------------------------------
 
 # make a request to the player stats endpoint
-resp <- request("https://api.chess.com/pub/player/balcoo/stats") %>% 
+resp <- request("https://api.chess.com/pub/player/balcoo/stats") |> 
   # perform API call
-  req_perform() %>% 
+  req_perform() |> 
   # extract the body of the response as a list
   resp_body_json()
 
@@ -191,7 +189,7 @@ resp <- request("https://api.chess.com/pub/player/balcoo/stats") %>%
 ## PLAYER ONLINE STATUS --------------------------------------------------------
 
 # make a request to the online status endpoint
-resp <- request("https://api.chess.com/pub/player/balcoo/is-online") %>% 
+resp <- request("https://api.chess.com/pub/player/balcoo/is-online") |> 
   # perform API call
   req_perform()
 
@@ -211,43 +209,116 @@ resp <- request("https://api.chess.com/pub/player/balcoo/is-online") %>%
 ### CURRENT DAILY CHESS --------------------------------------------------------
 
 # make a request to the player stats endpoint
-resp <- request("https://api.chess.com/pub/player/tuhieu/games") %>% 
+resp <- request("https://api.chess.com/pub/player/tuhieu/games") |> 
   # perform API call
-  req_perform() %>% 
+  req_perform() |> 
   # extract the body of the response as a list
-  resp_body_json() %>% 
+  resp_body_json() |> 
   # for some reason, the response is a list within a list; extract it
-  extract2('games') %>% 
+  unlist(recursive = FALSE, use.names = FALSE) |> 
   # convert the list with all info for each game, to a tibble
   map_dfr(bind_cols)
 
 # there are 2 optional fields:
 # - tournament: only for tournament matches, link to the tournament
 # - match : only for team matches, link to the team match
+opt_cols <- c(
+  tournament = NA_character_,
+  match = NA_character_
+)
 
-# HOW TO ADDRESS THESE?
+# add empty columns for optional values not present in the response
+resp <- resp |> 
+  add_column(!!!opt_cols[!names(opt_cols) %in% names(resp)])
 
-# preprocessing
-respp %>%
-  mutate(
-    # remove URL from game ID (this also contains the game time format!)
-    game_id = str_remove(url, pattern = "^https://www.chess.com/game/daily/"),
-    # remove URL from tournament name
-    tournament = str_remove(tournament, "^https://api.chess.com/pub/tournament/"),
-    # remove URL from team match
-    team_match = str_remove(match, "^https://api.chess.com/pub/match/"),
-    # convert EPOCHs to readable timestamps
-    across(c(move_by, last_activity, start_time), anytime, tz = 'GMT'),
-    # remove URL from player IDs
-    across(
-      .cols = c(white, black), 
-      .fns = ~str_remove(., pattern = "^https://api.chess.com/pub/player/"),
-      .names = 'player_{col}'
-    ),
-    .keep = 'unused'
-  ) %>% 
-  View()
+# preprocessing (only if there are rows)
+if (nrow(resp) > 0){
+  
+  resp <- resp |>
+    mutate(
+      # remove URL from game ID (this also contains the game time format!)
+      game_id = str_remove(url, pattern = "^https://www.chess.com/game/daily/"),
+      # remove URL from tournament name
+      tournament = str_remove(tournament, "^https://api.chess.com/pub/tournament/"),
+      # remove URL from team match
+      match = str_remove(match, "^https://api.chess.com/pub/match/"),
+      # convert EPOCHs to readable timestamps
+      across(c(move_by, last_activity, start_time), anytime, tz = 'GMT'),
+      # remove URL from player IDs
+      across(
+        .cols = c(white, black), 
+        .fns = str_remove,
+        pattern = "^https://api.chess.com/pub/player/",
+        .names = 'player_{col}'
+      ),
+      # add match type: one of "other", "tournament", "team_match"
+      # - tournament matches have a "tournament" field with tournament info;
+      # - team_match matches have a "match" field with team match info;
+      # - other matches don't have any additional optional field
+      # also add a "match_type_info" field with the additional information
+      match_type = case_when(
+        !is.na(tournament) ~ "tournament",
+        !is.na(match) ~ "team_match",
+        TRUE ~ "other"
+      ),
+      match_type_info = case_when(
+        !is.na(tournament) ~ tournament,
+        !is.na(match) ~ match,
+        TRUE ~ NA_character_
+      ),
+      .keep = 'unused'
+    ) |> 
+    # remove column(s) containing no useful information (or no more needed)
+    select(
+      # these are contained in the new "match_type" and "match_type_info" fields
+      -c(tournament, match)
+    ) |> 
+    # relocate columns to an order that makes more sense to me
+    relocate(
+      game_id,
+      start_time,
+      time_class,
+      time_control,
+      rated,
+      rules,
+      match_type,
+      match_type_info,
+      player_white,
+      player_black,
+      turn,
+      last_activity,
+      move_by,
+      fen,
+      pgn
+    )
+  
+}
 
 ### TO-MOVE DAILY CHESS --------------------------------------------------------
 
-# TBD
+# This endpoint contains information already retrievable from the one above.
+# Can be ignored.
+
+### LIST OF MONTHLY ARCHIVES ---------------------------------------------------
+
+# make a request to the player stats endpoint
+resp <- request("https://api.chess.com/pub/player/balcoo/games/archives") |> 
+  # perform API call
+  req_perform() |> 
+  # extract the body of the response as a list
+  resp_body_json() |> 
+  # the response is an array, so convert it to the equivalent R object
+  unlist(use.names = FALSE)
+
+### COMPLETE MONTHLY ARCHIVES --------------------------------------------------
+
+# make a request to the player stats endpoint
+resp <- request("https://api.chess.com/pub/player/balcoo/games/2021/01") |> 
+  # perform API call
+  req_perform() |> 
+  # extract the body of the response as a list
+  resp_body_json() |> 
+  # the response is a list within a list; extract it
+  unlist(recursive = FALSE, use.names = FALSE)
+
+# WIP
